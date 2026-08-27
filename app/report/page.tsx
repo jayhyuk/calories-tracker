@@ -13,8 +13,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { getCategories, getEntries, getGoals } from '@/lib/storage';
-import { Category, Entry, Goals } from '@/lib/types';
+import { getCategories, getEntries, getGoals, getWaterEntries } from '@/lib/storage';
+import { Category, Entry, Goals, WaterEntry } from '@/lib/types';
 
 const RANGE_OPTIONS = [
   { label: '7 days', days: 7 },
@@ -37,12 +37,14 @@ function dayLabel(key: string): string {
 export default function ReportPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [goals, setGoals] = useState<Goals>({ calories: 2000, protein: 150 });
+  const [waterEntries, setWaterEntries] = useState<WaterEntry[]>([]);
+  const [goals, setGoals] = useState<Goals>({ calories: 2000, protein: 150, carbs: 250, water: 2000 });
   const [rangeDays, setRangeDays] = useState(7);
 
   useEffect(() => {
     setCategories(getCategories());
     setEntries(getEntries());
+    setWaterEntries(getWaterEntries());
     setGoals(getGoals());
   }, []);
 
@@ -65,6 +67,13 @@ export default function ReportPage() {
     return entries.filter((e) => new Date(e.time) >= cutoff);
   }, [entries, rangeDays]);
 
+  const filteredWaterEntries = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (rangeDays - 1));
+    return waterEntries.filter((e) => new Date(e.time) >= cutoff);
+  }, [waterEntries, rangeDays]);
+
   const caloriesByDay = useMemo(() => {
     return days.map((key) => {
       const row: Record<string, number | string> = { day: dayLabel(key) };
@@ -81,37 +90,54 @@ export default function ReportPage() {
 
   const proteinByDay = useMemo(() => {
     return days.map((key) => {
-      let total = 0;
+      let protein = 0;
+      let carbs = 0;
       for (const e of filteredEntries) {
         if (dayKey(e.time) !== key) continue;
-        total += Number(e.protein) || 0;
+        protein += Number(e.protein) || 0;
+        carbs += Number(e.carbs) || 0;
       }
-      return { day: dayLabel(key), protein: total };
+      return { day: dayLabel(key), protein, carbs };
     });
   }, [days, filteredEntries]);
 
+  const waterByDay = useMemo(() => {
+    return days.map((key) => {
+      let water = 0;
+      for (const e of filteredWaterEntries) {
+        if (dayKey(e.time) !== key) continue;
+        water += Number(e.amountMl) || 0;
+      }
+      return { day: dayLabel(key), water };
+    });
+  }, [days, filteredWaterEntries]);
+
   const categoryTotals = useMemo(() => {
-    const totals: Record<string, { calories: number; protein: number }> = {};
+    const totals: Record<string, { calories: number; protein: number; carbs: number }> = {};
     for (const e of filteredEntries) {
       const cat = categories.find((c) => c.id === e.categoryId);
       const label = cat?.name ?? 'Uncategorized';
-      if (!totals[label]) totals[label] = { calories: 0, protein: 0 };
+      if (!totals[label]) totals[label] = { calories: 0, protein: 0, carbs: 0 };
       totals[label].calories += Number(e.calories) || 0;
       totals[label].protein += Number(e.protein) || 0;
+      totals[label].carbs += Number(e.carbs) || 0;
     }
     return totals;
   }, [filteredEntries, categories]);
 
   const grandTotal = useMemo(() => {
-    return filteredEntries.reduce(
+    const foodTotals = filteredEntries.reduce(
       (acc, e) => {
         acc.calories += Number(e.calories) || 0;
         acc.protein += Number(e.protein) || 0;
+        acc.carbs += Number(e.carbs) || 0;
         return acc;
       },
-      { calories: 0, protein: 0 }
+      { calories: 0, protein: 0, carbs: 0 }
     );
-  }, [filteredEntries]);
+    const water = filteredWaterEntries.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0);
+    return { ...foodTotals, water };
+  }, [filteredEntries, filteredWaterEntries]);
 
   type DayStatus = 'complete' | 'missed' | 'no-data';
 
@@ -119,33 +145,38 @@ export default function ReportPage() {
     const todayKey = dayKey(new Date().toISOString());
     return days.map((key) => {
       const dayEntries = filteredEntries.filter((e) => dayKey(e.time) === key);
+      const dayWater = filteredWaterEntries.filter((e) => dayKey(e.time) === key);
       const totals = dayEntries.reduce(
         (acc, e) => {
           acc.calories += Number(e.calories) || 0;
           acc.protein += Number(e.protein) || 0;
+          acc.carbs += Number(e.carbs) || 0;
           return acc;
         },
-        { calories: 0, protein: 0 }
+        { calories: 0, protein: 0, carbs: 0 }
       );
+      const water = dayWater.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0);
 
       let status: DayStatus;
-      if (dayEntries.length === 0) {
+      if (dayEntries.length === 0 && dayWater.length === 0) {
         status = 'no-data';
       } else {
         const metCalories = totals.calories <= goals.calories;
         const metProtein = totals.protein >= goals.protein;
-        status = metCalories && metProtein ? 'complete' : 'missed';
+        const metCarbs = totals.carbs <= goals.carbs;
+        const metWater = water >= goals.water;
+        status = metCalories && metProtein && metCarbs && metWater ? 'complete' : 'missed';
       }
 
       return {
         key,
         label: dayLabel(key),
-        totals,
+        totals: { ...totals, water },
         status,
         isToday: key === todayKey,
       };
     });
-  }, [days, filteredEntries, goals]);
+  }, [days, filteredEntries, filteredWaterEntries, goals]);
 
   const dayStatusCounts = useMemo(() => {
     return dayStatuses.reduce(
@@ -186,13 +217,21 @@ export default function ReportPage() {
           <p className="text-xs font-medium text-gray-400">Total Protein</p>
           <p className="mt-1 text-xl font-bold text-gray-800">{grandTotal.protein}g</p>
         </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-gray-400">Total Carbs</p>
+          <p className="mt-1 text-xl font-bold text-gray-800">{grandTotal.carbs}g</p>
+        </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium text-gray-400">Total Water</p>
+          <p className="mt-1 text-xl font-bold text-gray-800">{grandTotal.water}ml</p>
+        </div>
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-600">Goal Completion</h2>
           <span className="text-[11px] text-gray-400">
-            Goal: {goals.calories} kcal · {goals.protein}g protein
+            Goal: {goals.calories} kcal · {goals.protein}g P · {goals.carbs}g C · {goals.water}ml water
           </span>
         </div>
         <div className="mb-3 flex gap-3 text-xs">
@@ -227,7 +266,8 @@ export default function ReportPage() {
                   'No entries'
                 ) : (
                   <>
-                    {d.totals.calories} kcal · {d.totals.protein}g protein
+                    {d.totals.calories} kcal · {d.totals.protein}g P · {d.totals.carbs}g C ·{' '}
+                    {d.totals.water}ml
                   </>
                 )}
               </span>
@@ -268,7 +308,7 @@ export default function ReportPage() {
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-gray-600">Protein Trend</h2>
+        <h2 className="mb-3 text-sm font-semibold text-gray-600">Protein &amp; Carbs Trend</h2>
         {filteredEntries.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">No data in this range.</p>
         ) : (
@@ -278,7 +318,40 @@ export default function ReportPage() {
               <XAxis dataKey="day" fontSize={11} tickLine={false} />
               <YAxis fontSize={11} tickLine={false} width={32} />
               <Tooltip />
-              <Line type="monotone" dataKey="protein" stroke="#1fb567" strokeWidth={2} dot={false} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line
+                type="monotone"
+                dataKey="protein"
+                name="Protein (g)"
+                stroke="#1fb567"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="carbs"
+                name="Carbs (g)"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="rounded-xl bg-white p-4 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-gray-600">Water Trend</h2>
+        {filteredWaterEntries.length === 0 ? (
+          <p className="py-8 text-center text-sm text-gray-400">No data in this range.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={waterByDay}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="day" fontSize={11} tickLine={false} />
+              <YAxis fontSize={11} tickLine={false} width={32} />
+              <Tooltip />
+              <Line type="monotone" dataKey="water" name="Water (ml)" stroke="#0ea5e9" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -302,7 +375,7 @@ export default function ReportPage() {
                     {label}
                   </span>
                   <span className="text-gray-500">
-                    {totals.calories} kcal · {totals.protein}g protein
+                    {totals.calories} kcal · {totals.protein}g P · {totals.carbs}g C
                   </span>
                 </li>
               );

@@ -1,12 +1,15 @@
-import { Category, CURRENT_SCHEMA_VERSION, Entry, ExportedData, Goals, TrackerData } from './types';
+import { Category, CURRENT_SCHEMA_VERSION, Entry, ExportedData, Goals, TrackerData, WaterEntry } from './types';
 
 const CATEGORIES_KEY = 'calorie-tracker:categories';
 const ENTRIES_KEY = 'calorie-tracker:entries';
+const WATER_ENTRIES_KEY = 'calorie-tracker:water-entries';
 const GOALS_KEY = 'calorie-tracker:goals';
 
 const DEFAULT_GOALS: Goals = {
   calories: 2000,
   protein: 150,
+  carbs: 250,
+  water: 2000,
 };
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -105,12 +108,44 @@ export function getGoals(): Goals {
     window.localStorage.setItem(GOALS_KEY, JSON.stringify(DEFAULT_GOALS));
     return DEFAULT_GOALS;
   }
-  return safeParse<Goals>(existing, DEFAULT_GOALS);
+  const parsed = safeParse<Partial<Goals>>(existing, DEFAULT_GOALS);
+  // Backfill any goal fields missing from older saved data (e.g. carbs/water).
+  const merged: Goals = { ...DEFAULT_GOALS, ...parsed };
+  return merged;
 }
 
 export function saveGoals(goals: Goals): void {
   if (!isBrowser()) return;
   window.localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
+}
+
+export function getWaterEntries(): WaterEntry[] {
+  if (!isBrowser()) return [];
+  const existing = window.localStorage.getItem(WATER_ENTRIES_KEY);
+  return safeParse<WaterEntry[]>(existing, []);
+}
+
+export function saveWaterEntries(entries: WaterEntry[]): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(WATER_ENTRIES_KEY, JSON.stringify(entries));
+}
+
+export function addWaterEntry(entry: Omit<WaterEntry, 'id' | 'createdAt'>): WaterEntry[] {
+  const entries = getWaterEntries();
+  const newEntry: WaterEntry = {
+    ...entry,
+    id: (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
+    createdAt: new Date().toISOString(),
+  };
+  const updated = [newEntry, ...entries];
+  saveWaterEntries(updated);
+  return updated;
+}
+
+export function removeWaterEntry(id: string): WaterEntry[] {
+  const entries = getWaterEntries().filter((e) => e.id !== id);
+  saveWaterEntries(entries);
+  return entries;
 }
 
 export function exportAllData(): ExportedData {
@@ -119,6 +154,7 @@ export function exportAllData(): ExportedData {
     exportedAt: new Date().toISOString(),
     categories: getCategories(),
     entries: getEntries(),
+    waterEntries: getWaterEntries(),
     goals: getGoals(),
   };
 }
@@ -127,10 +163,12 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   if (!data || !Array.isArray(data.categories) || !Array.isArray(data.entries)) {
     throw new Error('Invalid data format: expected { categories: [], entries: [] }');
   }
+  const waterEntries = Array.isArray(data.waterEntries) ? data.waterEntries : [];
 
   if (mode === 'replace') {
     saveCategories(data.categories);
     saveEntries(data.entries);
+    saveWaterEntries(waterEntries);
     if (data.goals) saveGoals(data.goals);
     return;
   }
@@ -146,6 +184,11 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   for (const e of data.entries) mergedEntriesMap.set(e.id, e);
   saveEntries(Array.from(mergedEntriesMap.values()));
 
+  const existingWaterEntries = getWaterEntries();
+  const mergedWaterMap = new Map(existingWaterEntries.map((e) => [e.id, e]));
+  for (const e of waterEntries) mergedWaterMap.set(e.id, e);
+  saveWaterEntries(Array.from(mergedWaterMap.values()));
+
   if (data.goals) saveGoals(data.goals);
 }
 
@@ -153,5 +196,6 @@ export function clearAllData(): void {
   if (!isBrowser()) return;
   window.localStorage.removeItem(CATEGORIES_KEY);
   window.localStorage.removeItem(ENTRIES_KEY);
+  window.localStorage.removeItem(WATER_ENTRIES_KEY);
   window.localStorage.removeItem(GOALS_KEY);
 }

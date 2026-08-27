@@ -10,6 +10,16 @@ export interface Entry {
   categoryId: string;
   calories: number;
   protein: number;
+  carbs: number;
+  /** ISO datetime string, editable by the user (defaults to "now" at creation time) */
+  time: string;
+  createdAt: string;
+}
+
+export interface WaterEntry {
+  id: string;
+  /** amount in milliliters */
+  amountMl: number;
   /** ISO datetime string, editable by the user (defaults to "now" at creation time) */
   time: string;
   createdAt: string;
@@ -18,11 +28,15 @@ export interface Entry {
 export interface Goals {
   calories: number;
   protein: number;
+  carbs: number;
+  /** daily water target in milliliters */
+  water: number;
 }
 
 export interface TrackerData {
   categories: Category[];
   entries: Entry[];
+  waterEntries: WaterEntry[];
   goals: Goals;
 }
 

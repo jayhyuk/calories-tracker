@@ -13,23 +13,38 @@ export default function SettingsPage() {
 
   const [goalCalories, setGoalCalories] = useState('2000');
   const [goalProtein, setGoalProtein] = useState('150');
+  const [goalCarbs, setGoalCarbs] = useState('250');
+  const [goalWater, setGoalWater] = useState('2000');
   const [goalStatus, setGoalStatus] = useState('');
 
   useEffect(() => {
     const goals = getGoals();
     setGoalCalories(String(goals.calories));
     setGoalProtein(String(goals.protein));
+    setGoalCarbs(String(goals.carbs));
+    setGoalWater(String(goals.water));
   }, []);
 
   function handleSaveGoals(ev: React.FormEvent) {
     ev.preventDefault();
     const calories = Number(goalCalories);
     const protein = Number(goalProtein);
-    if (!Number.isFinite(calories) || calories <= 0 || !Number.isFinite(protein) || protein < 0) {
+    const carbs = Number(goalCarbs);
+    const water = Number(goalWater);
+    if (
+      !Number.isFinite(calories) ||
+      calories <= 0 ||
+      !Number.isFinite(protein) ||
+      protein < 0 ||
+      !Number.isFinite(carbs) ||
+      carbs < 0 ||
+      !Number.isFinite(water) ||
+      water < 0
+    ) {
       setGoalStatus('Please enter valid positive numbers.');
       return;
     }
-    saveGoals({ calories, protein });
+    saveGoals({ calories, protein, carbs, water });
     setGoalStatus('Daily goals saved!');
     setTimeout(() => setGoalStatus(''), 2000);
   }
@@ -101,8 +116,8 @@ export default function SettingsPage() {
       <section className="rounded-xl bg-white p-4 shadow-sm">
         <h2 className="mb-1 text-sm font-semibold text-gray-700">Daily goals</h2>
         <p className="mb-3 text-xs text-gray-400">
-          Set your daily calorie and protein targets. These are used on the Add page and in
-          Reports to show how much you have left, and which days you hit your goal.
+          Set your daily calorie, protein, carbs, and water targets. These are used on the Add
+          page and in Reports to show how much you have left, and which days you hit your goal.
         </p>
         <form onSubmit={handleSaveGoals} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -129,6 +144,32 @@ export default function SettingsPage() {
                 min={0}
                 value={goalProtein}
                 onChange={(e) => setGoalProtein(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Target Carbs (g)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                value={goalCarbs}
+                onChange={(e) => setGoalCarbs(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Target Water (ml)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                value={goalWater}
+                onChange={(e) => setGoalWater(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
             </div>
