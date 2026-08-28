@@ -13,8 +13,15 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { getCategories, getEntries, getGoals, getWaterEntries } from '@/lib/storage';
-import { Category, Entry, Goals, WaterEntry } from '@/lib/types';
+import { allTargetsMet } from '@/lib/metrics';
+import {
+  getCategories,
+  getDayTypeForDate,
+  getEntries,
+  getMetrics,
+  getWaterEntries,
+} from '@/lib/storage';
+import { Category, DayType, Entry, Metric, WaterEntry } from '@/lib/types';
 
 const RANGE_OPTIONS = [
   { label: '7 days', days: 7 },
@@ -38,14 +45,14 @@ export default function ReportPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [waterEntries, setWaterEntries] = useState<WaterEntry[]>([]);
-  const [goals, setGoals] = useState<Goals>({ calories: 2000, protein: 150, carbs: 250, water: 2000 });
+  const [metrics, setMetrics] = useState<Metric[]>([]);
   const [rangeDays, setRangeDays] = useState(7);
 
   useEffect(() => {
     setCategories(getCategories());
     setEntries(getEntries());
     setWaterEntries(getWaterEntries());
-    setGoals(getGoals());
+    setMetrics(getMetrics());
   }, []);
 
   const days = useMemo(() => {
@@ -142,10 +149,21 @@ export default function ReportPage() {
   type DayStatus = 'complete' | 'missed' | 'no-data';
 
   const dayStatuses = useMemo(() => {
-    const todayKey = dayKey(new Date().toISOString());
+    const todayKeyStr = dayKey(new Date().toISOString());
     return days.map((key) => {
+      const dayType: DayType = getDayTypeForDate(key);
       const dayEntries = filteredEntries.filter((e) => dayKey(e.time) === key);
       const dayWater = filteredWaterEntries.filter((e) => dayKey(e.time) === key);
+
+      let status: DayStatus;
+      if (dayEntries.length === 0 && dayWater.length === 0) {
+        status = 'no-data';
+      } else {
+        status = allTargetsMet(metrics, dayType.targets, dayEntries, dayWater)
+          ? 'complete'
+          : 'missed';
+      }
+
       const totals = dayEntries.reduce(
         (acc, e) => {
           acc.calories += Number(e.calories) || 0;
@@ -157,26 +175,16 @@ export default function ReportPage() {
       );
       const water = dayWater.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0);
 
-      let status: DayStatus;
-      if (dayEntries.length === 0 && dayWater.length === 0) {
-        status = 'no-data';
-      } else {
-        const metCalories = totals.calories <= goals.calories;
-        const metProtein = totals.protein >= goals.protein;
-        const metCarbs = totals.carbs <= goals.carbs;
-        const metWater = water >= goals.water;
-        status = metCalories && metProtein && metCarbs && metWater ? 'complete' : 'missed';
-      }
-
       return {
         key,
         label: dayLabel(key),
+        dayTypeName: dayType.name,
         totals: { ...totals, water },
         status,
-        isToday: key === todayKey,
+        isToday: key === todayKeyStr,
       };
     });
-  }, [days, filteredEntries, filteredWaterEntries, goals]);
+  }, [days, filteredEntries, filteredWaterEntries, metrics]);
 
   const dayStatusCounts = useMemo(() => {
     return dayStatuses.reduce(
@@ -230,13 +238,12 @@ export default function ReportPage() {
       <div className="rounded-xl bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-600">Goal Completion</h2>
-          <span className="text-[11px] text-gray-400">
-            Goal: {goals.calories} kcal · {goals.protein}g P · {goals.carbs}g C · {goals.water}ml water
-          </span>
+          <span className="text-[11px] text-gray-400">Per-day targets from day types</span>
         </div>
         <div className="mb-3 flex gap-3 text-xs">
           <span className="flex items-center gap-1 text-brand-600">
-            <span className="h-2 w-2 rounded-full bg-brand-500" /> {dayStatusCounts.complete} complete
+            <span className="h-2 w-2 rounded-full bg-brand-500" /> {dayStatusCounts.complete}{' '}
+            complete
           </span>
           <span className="flex items-center gap-1 text-red-500">
             <span className="h-2 w-2 rounded-full bg-red-400" /> {dayStatusCounts.missed} missed
@@ -260,6 +267,7 @@ export default function ReportPage() {
               <span className="font-medium text-gray-700">
                 {d.label}
                 {d.isToday ? ' (today)' : ''}
+                <span className="ml-1 font-normal text-gray-400">· {d.dayTypeName}</span>
               </span>
               <span className="text-gray-500">
                 {d.status === 'no-data' ? (

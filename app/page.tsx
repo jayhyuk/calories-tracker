@@ -2,16 +2,26 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  actualForMetric,
+  metricCardColor,
+  progressForMetric,
+  remainingLabel,
+} from '@/lib/metrics';
+import {
   addEntry,
   addWaterEntry,
   getCategories,
+  getDayTypeForDate,
+  getDayTypes,
   getEntries,
-  getGoals,
+  getMetrics,
   getWaterEntries,
   removeEntry,
   removeWaterEntry,
+  setDayAssignment,
+  todayKey,
 } from '@/lib/storage';
-import { Category, Entry, Goals, WaterEntry } from '@/lib/types';
+import { Category, DayType, Entry, Metric, WaterEntry } from '@/lib/types';
 
 const WATER_QUICK_ADD_ML = [150, 250, 500];
 
@@ -36,7 +46,9 @@ export default function AddCaloriePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [waterEntries, setWaterEntries] = useState<WaterEntry[]>([]);
-  const [goals, setGoals] = useState<Goals>({ calories: 2000, protein: 150, carbs: 250, water: 2000 });
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [dayTypes, setDayTypes] = useState<DayType[]>([]);
+  const [todayDayType, setTodayDayType] = useState<DayType | null>(null);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [calories, setCalories] = useState('');
@@ -53,7 +65,9 @@ export default function AddCaloriePage() {
     setCategoryId(cats[0]?.id ?? '');
     setEntries(getEntries());
     setWaterEntries(getWaterEntries());
-    setGoals(getGoals());
+    setMetrics(getMetrics());
+    setDayTypes(getDayTypes());
+    setTodayDayType(getDayTypeForDate(todayKey()));
   }, []);
 
   const todayEntries = useMemo(
@@ -66,31 +80,23 @@ export default function AddCaloriePage() {
     [waterEntries]
   );
 
-  const todayTotals = useMemo(() => {
-    return todayEntries.reduce(
-      (acc, e) => {
-        acc.calories += Number(e.calories) || 0;
-        acc.protein += Number(e.protein) || 0;
-        acc.carbs += Number(e.carbs) || 0;
-        return acc;
-      },
-      { calories: 0, protein: 0, carbs: 0 }
-    );
-  }, [todayEntries]);
+  const metricProgress = useMemo(() => {
+    if (!todayDayType) return [];
+    return metrics
+      .map((metric) => {
+        const target = todayDayType.targets[metric.id];
+        const actual = actualForMetric(metric.id, todayEntries, todayWaterEntries);
+        const progress = progressForMetric(metric, actual, target);
+        return progress ? { metric, ...progress } : null;
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+  }, [metrics, todayDayType, todayEntries, todayWaterEntries]);
 
-  const todayWaterMl = useMemo(
-    () => todayWaterEntries.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0),
-    [todayWaterEntries]
-  );
-
-  const remainingCalories = goals.calories - todayTotals.calories;
-  const remainingProtein = goals.protein - todayTotals.protein;
-  const remainingCarbs = goals.carbs - todayTotals.carbs;
-  const remainingWater = goals.water - todayWaterMl;
-  const caloriesPct = goals.calories > 0 ? Math.min(100, (todayTotals.calories / goals.calories) * 100) : 0;
-  const proteinPct = goals.protein > 0 ? Math.min(100, (todayTotals.protein / goals.protein) * 100) : 0;
-  const carbsPct = goals.carbs > 0 ? Math.min(100, (todayTotals.carbs / goals.carbs) * 100) : 0;
-  const waterPct = goals.water > 0 ? Math.min(100, (todayWaterMl / goals.water) * 100) : 0;
+  function handleDayTypeChange(dayTypeId: string) {
+    setDayAssignment(todayKey(), dayTypeId);
+    const selected = dayTypes.find((d) => d.id === dayTypeId) ?? getDayTypeForDate(todayKey());
+    setTodayDayType(selected);
+  }
 
   function categoryName(id: string) {
     return categories.find((c) => c.id === id)?.name ?? 'Uncategorized';
@@ -174,98 +180,77 @@ export default function AddCaloriePage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-brand-500 p-4 text-white shadow-sm">
-          <p className="text-xs font-medium opacity-90">Today's Calories</p>
-          <p className="mt-1 text-2xl font-bold">{todayTotals.calories}</p>
-          <p className="mt-1 text-[11px] opacity-90">of {goals.calories} kcal goal</p>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
-            <div
-              className="h-1.5 rounded-full bg-white"
-              style={{ width: `${caloriesPct}%` }}
-            />
-          </div>
-        </div>
-        <div className="rounded-xl bg-gray-900 p-4 text-white shadow-sm">
-          <p className="text-xs font-medium opacity-90">Today's Protein</p>
-          <p className="mt-1 text-2xl font-bold">{todayTotals.protein}g</p>
-          <p className="mt-1 text-[11px] opacity-90">of {goals.protein}g goal</p>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
-            <div
-              className="h-1.5 rounded-full bg-brand-400"
-              style={{ width: `${proteinPct}%` }}
-            />
-          </div>
-        </div>
-        <div className="rounded-xl bg-amber-500 p-4 text-white shadow-sm">
-          <p className="text-xs font-medium opacity-90">Today's Carbs</p>
-          <p className="mt-1 text-2xl font-bold">{todayTotals.carbs}g</p>
-          <p className="mt-1 text-[11px] opacity-90">of {goals.carbs}g goal</p>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
-            <div className="h-1.5 rounded-full bg-white" style={{ width: `${carbsPct}%` }} />
-          </div>
-        </div>
-        <div className="rounded-xl bg-sky-500 p-4 text-white shadow-sm">
-          <p className="text-xs font-medium opacity-90">Today's Water</p>
-          <p className="mt-1 text-2xl font-bold">{todayWaterMl}ml</p>
-          <p className="mt-1 text-[11px] opacity-90">of {goals.water}ml goal</p>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
-            <div className="h-1.5 rounded-full bg-white" style={{ width: `${waterPct}%` }} />
-          </div>
-        </div>
+      <div className="rounded-xl bg-white p-4 shadow-sm">
+        <label className="mb-1 block text-xs font-medium text-gray-500">Today&apos;s day type</label>
+        <select
+          value={todayDayType?.id ?? ''}
+          onChange={(e) => handleDayTypeChange(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          {dayTypes.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[11px] text-gray-400">
+          Targets come from this day type. Configure types on the{' '}
+          <a href="/target-config" className="text-brand-600 underline">
+            Targets
+          </a>{' '}
+          page.
+        </p>
       </div>
 
-      <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-700">
-          Remaining Today
-        </h2>
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <p className={remainingCalories >= 0 ? 'text-gray-700' : 'text-red-600'}>
-            {remainingCalories >= 0 ? (
-              <>
-                <span className="font-bold">{remainingCalories}</span> kcal left to eat
-              </>
-            ) : (
-              <>
-                <span className="font-bold">{Math.abs(remainingCalories)}</span> kcal over goal
-              </>
-            )}
-          </p>
-          <p className={remainingProtein >= 0 ? 'text-gray-700' : 'text-brand-700'}>
-            {remainingProtein >= 0 ? (
-              <>
-                <span className="font-bold">{remainingProtein}g</span> protein left to eat
-              </>
-            ) : (
-              <>
-                <span className="font-bold">{Math.abs(remainingProtein)}g</span> protein over goal
-              </>
-            )}
-          </p>
-          <p className={remainingCarbs >= 0 ? 'text-gray-700' : 'text-amber-700'}>
-            {remainingCarbs >= 0 ? (
-              <>
-                <span className="font-bold">{remainingCarbs}g</span> carbs left to eat
-              </>
-            ) : (
-              <>
-                <span className="font-bold">{Math.abs(remainingCarbs)}g</span> carbs over goal
-              </>
-            )}
-          </p>
-          <p className={remainingWater >= 0 ? 'text-gray-700' : 'text-sky-700'}>
-            {remainingWater >= 0 ? (
-              <>
-                <span className="font-bold">{remainingWater}ml</span> water left to drink
-              </>
-            ) : (
-              <>
-                <span className="font-bold">{Math.abs(remainingWater)}ml</span> water over goal
-              </>
-            )}
-          </p>
+      {metricProgress.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          {metricProgress.map(({ metric, actual, target, pct }) => (
+            <div
+              key={metric.id}
+              className={`rounded-xl p-4 text-white shadow-sm ${metricCardColor(metric.id)}`}
+            >
+              <p className="text-xs font-medium opacity-90">Today&apos;s {metric.label}</p>
+              <p className="mt-1 text-2xl font-bold">
+                {actual !== null ? actual : '—'}
+                {actual !== null && metric.unit !== 'kcal' ? metric.unit : ''}
+              </p>
+              <p className="mt-1 text-[11px] opacity-90">
+                of {target} {metric.unit} target
+              </p>
+              {actual !== null && (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
+                  <div className="h-1.5 rounded-full bg-white" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
+      )}
+
+      {metricProgress.length > 0 && (
+        <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-700">
+            Remaining Today
+          </h2>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {metricProgress.map(({ metric, actual, remaining }) => {
+              if (actual === null) return null;
+              const { text, tone } = remainingLabel(metric, remaining);
+              const toneClass =
+                tone === 'warn'
+                  ? 'text-red-600'
+                  : tone === 'good'
+                  ? 'text-brand-700'
+                  : 'text-gray-700';
+              return (
+                <p key={metric.id} className={toneClass}>
+                  <span className="font-bold">{text}</span> {metric.label.toLowerCase()}
+                </p>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
         <div>
@@ -356,7 +341,9 @@ export default function AddCaloriePage() {
       <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-600">💧 Water</h2>
-          <span className="text-xs text-gray-400">{todayWaterMl}ml today</span>
+          <span className="text-xs text-gray-400">
+            {actualForMetric('water', todayEntries, todayWaterEntries) ?? 0}ml today
+          </span>
         </div>
         <div className="flex gap-2">
           {WATER_QUICK_ADD_ML.map((ml) => (
@@ -413,7 +400,7 @@ export default function AddCaloriePage() {
       </div>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold text-gray-600">Today's Entries</h2>
+        <h2 className="mb-2 text-sm font-semibold text-gray-600">Today&apos;s Entries</h2>
         {todayEntries.length === 0 ? (
           <p className="rounded-xl border border-dashed border-gray-300 bg-white p-4 text-center text-sm text-gray-400">
             No entries yet today.

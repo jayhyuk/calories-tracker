@@ -1,16 +1,25 @@
-import { Category, CURRENT_SCHEMA_VERSION, Entry, ExportedData, Goals, TrackerData, WaterEntry } from './types';
+import {
+  Category,
+  CURRENT_SCHEMA_VERSION,
+  DayAssignments,
+  DayType,
+  Entry,
+  ExportedData,
+  LegacyGoals,
+  Metric,
+  TrackerData,
+  WaterEntry,
+} from './types';
 
 const CATEGORIES_KEY = 'calorie-tracker:categories';
 const ENTRIES_KEY = 'calorie-tracker:entries';
 const WATER_ENTRIES_KEY = 'calorie-tracker:water-entries';
-const GOALS_KEY = 'calorie-tracker:goals';
-
-const DEFAULT_GOALS: Goals = {
-  calories: 2000,
-  protein: 150,
-  carbs: 250,
-  water: 2000,
-};
+const METRICS_KEY = 'calorie-tracker:metrics';
+const DAY_TYPES_KEY = 'calorie-tracker:day-types';
+const DAY_ASSIGNMENTS_KEY = 'calorie-tracker:day-assignments';
+const DEFAULT_DAY_TYPE_ID_KEY = 'calorie-tracker:default-day-type-id';
+/** @deprecated old single global goal, only read once for migration */
+const LEGACY_GOALS_KEY = 'calorie-tracker:goals';
 
 const DEFAULT_CATEGORIES: Category[] = [
   { id: 'breakfast', name: 'Breakfast', color: '#f59e0b' },
@@ -19,6 +28,19 @@ const DEFAULT_CATEGORIES: Category[] = [
   { id: 'snack', name: 'Snack', color: '#a855f7' },
   { id: 'drink', name: 'Drink', color: '#06b6d4' },
 ];
+
+export const DEFAULT_METRICS: Metric[] = [
+  { id: 'calories', label: 'Calories', unit: 'kcal', direction: 'max' },
+  { id: 'protein', label: 'Protein', unit: 'g', direction: 'min' },
+  { id: 'carbs', label: 'Carbs', unit: 'g', direction: 'max' },
+  { id: 'water', label: 'Water', unit: 'ml', direction: 'min' },
+];
+
+const LEGACY_GOALS_DEFAULT: LegacyGoals = { calories: 2000, protein: 150, carbs: 250, water: 2000 };
+
+function defaultDayType(targets: Record<string, number> = { ...LEGACY_GOALS_DEFAULT }): DayType {
+  return { id: 'standard', name: 'Standard', color: '#1fb567', targets };
+}
 
 function isBrowser() {
   return typeof window !== 'undefined';
@@ -32,6 +54,25 @@ function safeParse<T>(raw: string | null, fallback: T): T {
     return fallback;
   }
 }
+
+function newId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+export function dateKey(input: string | Date): string {
+  const d = typeof input === 'string' ? new Date(input) : input;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+
+export function todayKey(): string {
+  return dateKey(new Date());
+}
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
 
 export function getCategories(): Category[] {
   if (!isBrowser()) return DEFAULT_CATEGORIES;
@@ -50,11 +91,7 @@ export function saveCategories(categories: Category[]): void {
 
 export function addCategory(name: string, color: string): Category[] {
   const categories = getCategories();
-  const newCategory: Category = {
-    id: (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
-    name,
-    color,
-  };
+  const newCategory: Category = { id: newId(), name, color };
   const updated = [...categories, newCategory];
   saveCategories(updated);
   return updated;
@@ -65,6 +102,10 @@ export function removeCategory(id: string): Category[] {
   saveCategories(categories);
   return categories;
 }
+
+// ---------------------------------------------------------------------------
+// Food/drink entries
+// ---------------------------------------------------------------------------
 
 export function getEntries(): Entry[] {
   if (!isBrowser()) return [];
@@ -79,11 +120,7 @@ export function saveEntries(entries: Entry[]): void {
 
 export function addEntry(entry: Omit<Entry, 'id' | 'createdAt'>): Entry[] {
   const entries = getEntries();
-  const newEntry: Entry = {
-    ...entry,
-    id: (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
-    createdAt: new Date().toISOString(),
-  };
+  const newEntry: Entry = { ...entry, id: newId(), createdAt: new Date().toISOString() };
   const updated = [newEntry, ...entries];
   saveEntries(updated);
   return updated;
@@ -101,23 +138,9 @@ export function updateEntry(id: string, patch: Partial<Entry>): Entry[] {
   return entries;
 }
 
-export function getGoals(): Goals {
-  if (!isBrowser()) return DEFAULT_GOALS;
-  const existing = window.localStorage.getItem(GOALS_KEY);
-  if (!existing) {
-    window.localStorage.setItem(GOALS_KEY, JSON.stringify(DEFAULT_GOALS));
-    return DEFAULT_GOALS;
-  }
-  const parsed = safeParse<Partial<Goals>>(existing, DEFAULT_GOALS);
-  // Backfill any goal fields missing from older saved data (e.g. carbs/water).
-  const merged: Goals = { ...DEFAULT_GOALS, ...parsed };
-  return merged;
-}
-
-export function saveGoals(goals: Goals): void {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
-}
+// ---------------------------------------------------------------------------
+// Water entries
+// ---------------------------------------------------------------------------
 
 export function getWaterEntries(): WaterEntry[] {
   if (!isBrowser()) return [];
@@ -132,11 +155,7 @@ export function saveWaterEntries(entries: WaterEntry[]): void {
 
 export function addWaterEntry(entry: Omit<WaterEntry, 'id' | 'createdAt'>): WaterEntry[] {
   const entries = getWaterEntries();
-  const newEntry: WaterEntry = {
-    ...entry,
-    id: (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
-    createdAt: new Date().toISOString(),
-  };
+  const newEntry: WaterEntry = { ...entry, id: newId(), createdAt: new Date().toISOString() };
   const updated = [newEntry, ...entries];
   saveWaterEntries(updated);
   return updated;
@@ -148,6 +167,151 @@ export function removeWaterEntry(id: string): WaterEntry[] {
   return entries;
 }
 
+// ---------------------------------------------------------------------------
+// Metrics (key/value target definitions — fully user-configurable)
+// ---------------------------------------------------------------------------
+
+export function getMetrics(): Metric[] {
+  if (!isBrowser()) return DEFAULT_METRICS;
+  const existing = window.localStorage.getItem(METRICS_KEY);
+  if (!existing) {
+    window.localStorage.setItem(METRICS_KEY, JSON.stringify(DEFAULT_METRICS));
+    return DEFAULT_METRICS;
+  }
+  return safeParse<Metric[]>(existing, DEFAULT_METRICS);
+}
+
+export function saveMetrics(metrics: Metric[]): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
+}
+
+export function addMetric(label: string, unit: string, direction: 'min' | 'max'): Metric[] {
+  const metrics = getMetrics();
+  const id = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || newId();
+  const uniqueId = metrics.some((m) => m.id === id) ? `${id}_${newId().slice(0, 4)}` : id;
+  const updated = [...metrics, { id: uniqueId, label: label.trim(), unit: unit.trim(), direction }];
+  saveMetrics(updated);
+  return updated;
+}
+
+export function removeMetric(id: string): Metric[] {
+  const metrics = getMetrics().filter((m) => m.id !== id);
+  saveMetrics(metrics);
+  return metrics;
+}
+
+// ---------------------------------------------------------------------------
+// Day types (named target profiles, e.g. "Gym Day", "Cardio Day", "Rest Day")
+// ---------------------------------------------------------------------------
+
+function migrateLegacyGoalsToDayType(): DayType {
+  if (!isBrowser()) return defaultDayType();
+  const legacyRaw = window.localStorage.getItem(LEGACY_GOALS_KEY);
+  const legacy = safeParse<Partial<LegacyGoals> | null>(legacyRaw, null);
+  if (legacy) {
+    return defaultDayType({ ...LEGACY_GOALS_DEFAULT, ...legacy });
+  }
+  return defaultDayType();
+}
+
+export function getDayTypes(): DayType[] {
+  if (!isBrowser()) return [defaultDayType()];
+  const existing = window.localStorage.getItem(DAY_TYPES_KEY);
+  if (!existing) {
+    const seeded = [migrateLegacyGoalsToDayType()];
+    window.localStorage.setItem(DAY_TYPES_KEY, JSON.stringify(seeded));
+    if (!window.localStorage.getItem(DEFAULT_DAY_TYPE_ID_KEY)) {
+      window.localStorage.setItem(DEFAULT_DAY_TYPE_ID_KEY, seeded[0].id);
+    }
+    return seeded;
+  }
+  const parsed = safeParse<DayType[]>(existing, [defaultDayType()]);
+  return parsed.length > 0 ? parsed : [defaultDayType()];
+}
+
+export function saveDayTypes(dayTypes: DayType[]): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(DAY_TYPES_KEY, JSON.stringify(dayTypes));
+}
+
+export function addDayType(name: string, color: string, targets: Record<string, number>): DayType[] {
+  const dayTypes = getDayTypes();
+  const updated = [...dayTypes, { id: newId(), name, color, targets }];
+  saveDayTypes(updated);
+  return updated;
+}
+
+export function updateDayType(id: string, patch: Partial<Omit<DayType, 'id'>>): DayType[] {
+  const updated = getDayTypes().map((d) => (d.id === id ? { ...d, ...patch } : d));
+  saveDayTypes(updated);
+  return updated;
+}
+
+export function removeDayType(id: string): DayType[] {
+  const remaining = getDayTypes().filter((d) => d.id !== id);
+  const finalList = remaining.length > 0 ? remaining : [defaultDayType()];
+  saveDayTypes(finalList);
+  if (getDefaultDayTypeId() === id) {
+    setDefaultDayTypeId(finalList[0].id);
+  }
+  return finalList;
+}
+
+export function getDefaultDayTypeId(): string {
+  const dayTypes = getDayTypes();
+  if (!isBrowser()) return dayTypes[0].id;
+  const existing = window.localStorage.getItem(DEFAULT_DAY_TYPE_ID_KEY);
+  if (existing && dayTypes.some((d) => d.id === existing)) return existing;
+  const fallback = dayTypes[0].id;
+  window.localStorage.setItem(DEFAULT_DAY_TYPE_ID_KEY, fallback);
+  return fallback;
+}
+
+export function setDefaultDayTypeId(id: string): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(DEFAULT_DAY_TYPE_ID_KEY, id);
+}
+
+// ---------------------------------------------------------------------------
+// Day type assignments (which day type applies to a given calendar date)
+// ---------------------------------------------------------------------------
+
+export function getDayAssignments(): DayAssignments {
+  if (!isBrowser()) return {};
+  const existing = window.localStorage.getItem(DAY_ASSIGNMENTS_KEY);
+  return safeParse<DayAssignments>(existing, {});
+}
+
+export function saveDayAssignments(assignments: DayAssignments): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(DAY_ASSIGNMENTS_KEY, JSON.stringify(assignments));
+}
+
+export function setDayAssignment(date: string, dayTypeId: string): DayAssignments {
+  const assignments = { ...getDayAssignments(), [date]: dayTypeId };
+  saveDayAssignments(assignments);
+  return assignments;
+}
+
+/** Resolves the DayType that applies to a given date: explicit assignment, else the default. */
+export function getDayTypeForDate(date: string): DayType {
+  const dayTypes = getDayTypes();
+  const assignments = getDayAssignments();
+  const assignedId = assignments[date];
+  const defaultId = getDefaultDayTypeId();
+  const resolvedId = assignedId ?? defaultId;
+  return dayTypes.find((d) => d.id === resolvedId) ?? dayTypes[0];
+}
+
+// ---------------------------------------------------------------------------
+// Export / import / clear
+// ---------------------------------------------------------------------------
+
 export function exportAllData(): ExportedData {
   return {
     version: CURRENT_SCHEMA_VERSION,
@@ -155,7 +319,10 @@ export function exportAllData(): ExportedData {
     categories: getCategories(),
     entries: getEntries(),
     waterEntries: getWaterEntries(),
-    goals: getGoals(),
+    metrics: getMetrics(),
+    dayTypes: getDayTypes(),
+    dayAssignments: getDayAssignments(),
+    defaultDayTypeId: getDefaultDayTypeId(),
   };
 }
 
@@ -165,11 +332,34 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   }
   const waterEntries = Array.isArray(data.waterEntries) ? data.waterEntries : [];
 
+  // Build the day types / metrics to import, migrating legacy single-goal exports if needed.
+  let importedMetrics = Array.isArray(data.metrics) ? data.metrics : null;
+  let importedDayTypes = Array.isArray(data.dayTypes) ? data.dayTypes : null;
+  let importedDefaultDayTypeId = data.defaultDayTypeId;
+  const importedAssignments: DayAssignments =
+    data.dayAssignments && typeof data.dayAssignments === 'object' ? data.dayAssignments : {};
+
+  if (!importedDayTypes) {
+    // Legacy export shape: { goals: { calories, protein, carbs, water } }
+    const legacy = data.goals;
+    importedDayTypes = [defaultDayType(legacy ? { ...LEGACY_GOALS_DEFAULT, ...legacy } : undefined)];
+    importedDefaultDayTypeId = importedDayTypes[0].id;
+  }
+  if (!importedMetrics) {
+    importedMetrics = DEFAULT_METRICS;
+  }
+  if (!importedDefaultDayTypeId) {
+    importedDefaultDayTypeId = importedDayTypes[0]?.id ?? defaultDayType().id;
+  }
+
   if (mode === 'replace') {
     saveCategories(data.categories);
     saveEntries(data.entries);
     saveWaterEntries(waterEntries);
-    if (data.goals) saveGoals(data.goals);
+    saveMetrics(importedMetrics);
+    saveDayTypes(importedDayTypes);
+    saveDayAssignments(importedAssignments);
+    setDefaultDayTypeId(importedDefaultDayTypeId);
     return;
   }
 
@@ -189,7 +379,17 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   for (const e of waterEntries) mergedWaterMap.set(e.id, e);
   saveWaterEntries(Array.from(mergedWaterMap.values()));
 
-  if (data.goals) saveGoals(data.goals);
+  const existingMetrics = getMetrics();
+  const mergedMetricsMap = new Map(existingMetrics.map((m) => [m.id, m]));
+  for (const m of importedMetrics) mergedMetricsMap.set(m.id, m);
+  saveMetrics(Array.from(mergedMetricsMap.values()));
+
+  const existingDayTypes = getDayTypes();
+  const mergedDayTypesMap = new Map(existingDayTypes.map((d) => [d.id, d]));
+  for (const d of importedDayTypes) mergedDayTypesMap.set(d.id, d);
+  saveDayTypes(Array.from(mergedDayTypesMap.values()));
+
+  saveDayAssignments({ ...getDayAssignments(), ...importedAssignments });
 }
 
 export function clearAllData(): void {
@@ -197,5 +397,9 @@ export function clearAllData(): void {
   window.localStorage.removeItem(CATEGORIES_KEY);
   window.localStorage.removeItem(ENTRIES_KEY);
   window.localStorage.removeItem(WATER_ENTRIES_KEY);
-  window.localStorage.removeItem(GOALS_KEY);
+  window.localStorage.removeItem(METRICS_KEY);
+  window.localStorage.removeItem(DAY_TYPES_KEY);
+  window.localStorage.removeItem(DAY_ASSIGNMENTS_KEY);
+  window.localStorage.removeItem(DEFAULT_DAY_TYPE_ID_KEY);
+  window.localStorage.removeItem(LEGACY_GOALS_KEY);
 }

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const TITLES: Record<string, string> = {
   '/': 'Log Calories',
   '/report': 'Report',
+  '/target-config': 'Target Config',
   '/categories': 'Categories',
   '/settings': 'Settings',
 };

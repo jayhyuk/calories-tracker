@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { clearAllData, exportAllData, getGoals, importAllData, saveGoals } from '@/lib/storage';
+import { useRef, useState } from 'react';
+import { clearAllData, exportAllData, importAllData } from '@/lib/storage';
 
 export default function SettingsPage() {
   const [copyStatus, setCopyStatus] = useState('');
@@ -10,44 +10,6 @@ export default function SettingsPage() {
     null
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [goalCalories, setGoalCalories] = useState('2000');
-  const [goalProtein, setGoalProtein] = useState('150');
-  const [goalCarbs, setGoalCarbs] = useState('250');
-  const [goalWater, setGoalWater] = useState('2000');
-  const [goalStatus, setGoalStatus] = useState('');
-
-  useEffect(() => {
-    const goals = getGoals();
-    setGoalCalories(String(goals.calories));
-    setGoalProtein(String(goals.protein));
-    setGoalCarbs(String(goals.carbs));
-    setGoalWater(String(goals.water));
-  }, []);
-
-  function handleSaveGoals(ev: React.FormEvent) {
-    ev.preventDefault();
-    const calories = Number(goalCalories);
-    const protein = Number(goalProtein);
-    const carbs = Number(goalCarbs);
-    const water = Number(goalWater);
-    if (
-      !Number.isFinite(calories) ||
-      calories <= 0 ||
-      !Number.isFinite(protein) ||
-      protein < 0 ||
-      !Number.isFinite(carbs) ||
-      carbs < 0 ||
-      !Number.isFinite(water) ||
-      water < 0
-    ) {
-      setGoalStatus('Please enter valid positive numbers.');
-      return;
-    }
-    saveGoals({ calories, protein, carbs, water });
-    setGoalStatus('Daily goals saved!');
-    setTimeout(() => setGoalStatus(''), 2000);
-  }
 
   function handleExportJson(): string {
     return JSON.stringify(exportAllData(), null, 2);
@@ -114,74 +76,17 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-xl bg-white p-4 shadow-sm">
-        <h2 className="mb-1 text-sm font-semibold text-gray-700">Daily goals</h2>
+        <h2 className="mb-1 text-sm font-semibold text-gray-700">Daily targets</h2>
         <p className="mb-3 text-xs text-gray-400">
-          Set your daily calorie, protein, carbs, and water targets. These are used on the Add
-          page and in Reports to show how much you have left, and which days you hit your goal.
+          Targets are configured per day type (Gym Day, Rest Day, etc.) on the Targets page.
+          Old exports with a single global goal are automatically migrated on import.
         </p>
-        <form onSubmit={handleSaveGoals} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Target Calories (kcal)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                value={goalCalories}
-                onChange={(e) => setGoalCalories(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Target Protein (g)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                value={goalProtein}
-                onChange={(e) => setGoalProtein(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Target Carbs (g)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                value={goalCarbs}
-                onChange={(e) => setGoalCarbs(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Target Water (ml)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                value={goalWater}
-                onChange={(e) => setGoalWater(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-          </div>
-          {goalStatus && <p className="text-xs font-medium text-brand-600">{goalStatus}</p>}
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white active:bg-brand-600"
-          >
-            Save Goals
-          </button>
-        </form>
+        <a
+          href="/target-config"
+          className="block w-full rounded-lg bg-brand-500 py-2.5 text-center text-sm font-semibold text-white active:bg-brand-600"
+        >
+          Open Target Config
+        </a>
       </section>
 
       <section className="rounded-xl bg-white p-4 shadow-sm">
