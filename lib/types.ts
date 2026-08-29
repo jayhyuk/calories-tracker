@@ -18,6 +18,19 @@ export interface Entry {
   createdAt: string;
 }
 
+/**
+ * A saved food template for quick re-use. Stores all metric values so the
+ * user can pick from a dropdown and avoid re-entering nutrition info every time.
+ */
+export interface FoodTemplate {
+  id: string;
+  name: string;
+  categoryId: string;
+  /** Pre-filled metric values, keyed by metricId (calories, protein, carbs, oil, etc.) */
+  values: Record<string, number>;
+  createdAt: string;
+}
+
 export interface WaterEntry {
   id: string;
   /** amount in milliliters */
@@ -73,6 +86,7 @@ export interface TrackerData {
   dayTypes: DayType[];
   dayAssignments: DayAssignments;
   defaultDayTypeId: string;
+  foodTemplates?: FoodTemplate[];
   /** @deprecated present only in old exports; migrated into dayTypes on import */
   goals?: LegacyGoals;
 }

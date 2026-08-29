@@ -5,6 +5,7 @@ import {
   DayType,
   Entry,
   ExportedData,
+  FoodTemplate,
   LegacyGoals,
   Metric,
   TrackerData,
@@ -19,6 +20,7 @@ const METRICS_KEY = 'calorie-tracker:metrics';
 const DAY_TYPES_KEY = 'calorie-tracker:day-types';
 const DAY_ASSIGNMENTS_KEY = 'calorie-tracker:day-assignments';
 const DEFAULT_DAY_TYPE_ID_KEY = 'calorie-tracker:default-day-type-id';
+const FOOD_TEMPLATES_KEY = 'calorie-tracker:food-templates';
 /** @deprecated old single global goal, only read once for migration */
 const LEGACY_GOALS_KEY = 'calorie-tracker:goals';
 
@@ -137,6 +139,35 @@ export function updateEntry(id: string, patch: Partial<Entry>): Entry[] {
   const entries = getEntries().map((e) => (e.id === id ? { ...e, ...patch } : e));
   saveEntries(entries);
   return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Food templates
+// ---------------------------------------------------------------------------
+
+export function getFoodTemplates(): FoodTemplate[] {
+  if (!isBrowser()) return [];
+  const existing = window.localStorage.getItem(FOOD_TEMPLATES_KEY);
+  return safeParse<FoodTemplate[]>(existing, []);
+}
+
+export function saveFoodTemplates(templates: FoodTemplate[]): void {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(FOOD_TEMPLATES_KEY, JSON.stringify(templates));
+}
+
+export function addFoodTemplate(template: Omit<FoodTemplate, 'id' | 'createdAt'>): FoodTemplate[] {
+  const templates = getFoodTemplates();
+  const newTemplate: FoodTemplate = { ...template, id: newId(), createdAt: new Date().toISOString() };
+  const updated = [newTemplate, ...templates];
+  saveFoodTemplates(updated);
+  return updated;
+}
+
+export function removeFoodTemplate(id: string): FoodTemplate[] {
+  const templates = getFoodTemplates().filter((template) => template.id !== id);
+  saveFoodTemplates(templates);
+  return templates;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +372,7 @@ export function exportAllData(): ExportedData {
     dayTypes: getDayTypes(),
     dayAssignments: getDayAssignments(),
     defaultDayTypeId: getDefaultDayTypeId(),
+    foodTemplates: getFoodTemplates(),
   };
 }
 
@@ -349,6 +381,7 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
     throw new Error('Invalid data format: expected { categories: [], entries: [] }');
   }
   const waterEntries = Array.isArray(data.waterEntries) ? data.waterEntries : [];
+  const foodTemplates = Array.isArray(data.foodTemplates) ? data.foodTemplates : [];
 
   // Build the day types / metrics to import, migrating legacy single-goal exports if needed.
   let importedMetrics = Array.isArray(data.metrics) ? data.metrics : null;
@@ -380,6 +413,7 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
     saveDayTypes(importedDayTypes);
     saveDayAssignments(importedAssignments);
     setDefaultDayTypeId(importedDefaultDayTypeId);
+    saveFoodTemplates(foodTemplates);
     return;
   }
 
@@ -410,6 +444,11 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   saveDayTypes(Array.from(mergedDayTypesMap.values()));
 
   saveDayAssignments({ ...getDayAssignments(), ...importedAssignments });
+
+  const existingTemplates = getFoodTemplates();
+  const mergedTemplatesMap = new Map(existingTemplates.map((template) => [template.id, template]));
+  for (const template of foodTemplates) mergedTemplatesMap.set(template.id, template);
+  saveFoodTemplates(Array.from(mergedTemplatesMap.values()));
 }
 
 export function clearAllData(): void {
@@ -421,5 +460,6 @@ export function clearAllData(): void {
   window.localStorage.removeItem(DAY_TYPES_KEY);
   window.localStorage.removeItem(DAY_ASSIGNMENTS_KEY);
   window.localStorage.removeItem(DEFAULT_DAY_TYPE_ID_KEY);
+  window.localStorage.removeItem(FOOD_TEMPLATES_KEY);
   window.localStorage.removeItem(LEGACY_GOALS_KEY);
 }

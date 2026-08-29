@@ -15,11 +15,13 @@ import {
 } from '@/lib/metrics';
 import {
   addEntry,
+  addFoodTemplate,
   addWaterEntry,
   getCategories,
   getDayTypeForDate,
   getDayTypes,
   getEntries,
+  getFoodTemplates,
   getMetrics,
   getWaterEntries,
   removeEntry,
@@ -27,7 +29,7 @@ import {
   setDayAssignment,
   todayKey,
 } from '@/lib/storage';
-import { Category, DayType, Entry, Metric, WaterEntry } from '@/lib/types';
+import { Category, DayType, Entry, FoodTemplate, Metric, WaterEntry } from '@/lib/types';
 
 const WATER_QUICK_ADD_ML = [150, 250, 500];
 
@@ -55,6 +57,7 @@ function emptyFormValues(metricIds: string[]): Record<string, string> {
 export default function AddCaloriePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [foodTemplates, setFoodTemplates] = useState<FoodTemplate[]>([]);
   const [waterEntries, setWaterEntries] = useState<WaterEntry[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [dayTypes, setDayTypes] = useState<DayType[]>([]);
@@ -83,6 +86,7 @@ export default function AddCaloriePage() {
     setCategories(cats);
     setCategoryId(categoryIdForTime(now, cats));
     setEntries(getEntries());
+    setFoodTemplates(getFoodTemplates());
     setWaterEntries(getWaterEntries());
     const loadedMetrics = getMetrics();
     setMetrics(loadedMetrics);
@@ -140,6 +144,21 @@ export default function AddCaloriePage() {
     }
   }
 
+  function handleTemplateChange(templateId: string) {
+    if (!templateId) return;
+    const template = foodTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+    setName(template.name);
+    setCategoryId(template.categoryId);
+    setMetricValues((prev) => {
+      const next = { ...prev };
+      for (const metric of formMetrics) {
+        next[metric.id] = template.values[metric.id] !== undefined ? String(template.values[metric.id]) : '';
+      }
+      return next;
+    });
+  }
+
   function categoryName(id: string) {
     return categories.find((c) => c.id === id)?.name ?? 'Uncategorized';
   }
@@ -191,6 +210,18 @@ export default function AddCaloriePage() {
 
   function handleDelete(id: string) {
     setEntries(removeEntry(id));
+  }
+
+  function handleSaveTemplate(entry: Entry) {
+    const values = {
+      ...(entry.values ?? {}),
+      calories: getEntryMetricValue(entry, 'calories'),
+      protein: getEntryMetricValue(entry, 'protein'),
+      carbs: getEntryMetricValue(entry, 'carbs'),
+    };
+    setFoodTemplates(
+      addFoodTemplate({ name: entry.name, categoryId: entry.categoryId, values })
+    );
   }
 
   function handleAddWater(amountMl: number) {
@@ -312,6 +343,25 @@ export default function AddCaloriePage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
+        {foodTemplates.length > 0 && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">Saved food</label>
+            <select
+              defaultValue=""
+              onChange={(e) => handleTemplateChange(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            >
+              <option value="">Choose a saved food...</option>
+              {foodTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-gray-400">Fills in the name, category, and nutrition values.</p>
+          </div>
+        )}
+
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Name</label>
           <input
@@ -513,6 +563,14 @@ export default function AddCaloriePage() {
                             .join(' · ') || (calVal > 0 ? 'No other metrics' : '')}
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveTemplate(e)}
+                        aria-label={`Save ${e.name} as a food template`}
+                        className="rounded-lg px-2 py-1 text-[11px] font-medium text-brand-600 hover:bg-brand-50"
+                      >
+                        Save template
+                      </button>
                       <button
                         onClick={() => handleDelete(e.id)}
                         aria-label="Delete entry"
