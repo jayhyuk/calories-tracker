@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { allTargetsMet } from '@/lib/metrics';
+import { allTargetsMet, getEntryMetricValue } from '@/lib/metrics';
 import {
   getCategories,
   getDayTypeForDate,
@@ -89,7 +89,7 @@ export default function ReportPage() {
         if (dayKey(e.time) !== key) continue;
         const cat = categories.find((c) => c.id === e.categoryId);
         const label = cat?.name ?? 'Uncategorized';
-        row[label] = (Number(row[label]) || 0) + (Number(e.calories) || 0);
+        row[label] = (Number(row[label]) || 0) + getEntryMetricValue(e, 'calories');
       }
       return row;
     });
@@ -101,8 +101,8 @@ export default function ReportPage() {
       let carbs = 0;
       for (const e of filteredEntries) {
         if (dayKey(e.time) !== key) continue;
-        protein += Number(e.protein) || 0;
-        carbs += Number(e.carbs) || 0;
+        protein += getEntryMetricValue(e, 'protein');
+        carbs += getEntryMetricValue(e, 'carbs');
       }
       return { day: dayLabel(key), protein, carbs };
     });
@@ -125,9 +125,9 @@ export default function ReportPage() {
       const cat = categories.find((c) => c.id === e.categoryId);
       const label = cat?.name ?? 'Uncategorized';
       if (!totals[label]) totals[label] = { calories: 0, protein: 0, carbs: 0 };
-      totals[label].calories += Number(e.calories) || 0;
-      totals[label].protein += Number(e.protein) || 0;
-      totals[label].carbs += Number(e.carbs) || 0;
+      totals[label].calories += getEntryMetricValue(e, 'calories');
+      totals[label].protein += getEntryMetricValue(e, 'protein');
+      totals[label].carbs += getEntryMetricValue(e, 'carbs');
     }
     return totals;
   }, [filteredEntries, categories]);
@@ -135,9 +135,9 @@ export default function ReportPage() {
   const grandTotal = useMemo(() => {
     const foodTotals = filteredEntries.reduce(
       (acc, e) => {
-        acc.calories += Number(e.calories) || 0;
-        acc.protein += Number(e.protein) || 0;
-        acc.carbs += Number(e.carbs) || 0;
+        acc.calories += getEntryMetricValue(e, 'calories');
+        acc.protein += getEntryMetricValue(e, 'protein');
+        acc.carbs += getEntryMetricValue(e, 'carbs');
         return acc;
       },
       { calories: 0, protein: 0, carbs: 0 }
@@ -166,9 +166,9 @@ export default function ReportPage() {
 
       const totals = dayEntries.reduce(
         (acc, e) => {
-          acc.calories += Number(e.calories) || 0;
-          acc.protein += Number(e.protein) || 0;
-          acc.carbs += Number(e.carbs) || 0;
+          acc.calories += getEntryMetricValue(e, 'calories');
+          acc.protein += getEntryMetricValue(e, 'protein');
+          acc.carbs += getEntryMetricValue(e, 'carbs');
           return acc;
         },
         { calories: 0, protein: 0, carbs: 0 }

@@ -7,39 +7,72 @@ import { Entry, Metric, WaterEntry } from './types';
  */
 export const TRACKED_METRIC_IDS = ['calories', 'protein', 'carbs', 'water'] as const;
 
-const METRIC_CARD_COLORS: Record<string, string> = {
-  calories: 'bg-brand-500',
-  protein: 'bg-gray-900',
-  carbs: 'bg-amber-500',
-  water: 'bg-sky-500',
+/** Metrics that can be logged via the food entry form (not water). */
+export const FOOD_LOGGABLE_METRIC_IDS = ['calories', 'protein', 'carbs'] as const;
+
+export const DEFAULT_METRIC_COLORS: Record<string, string> = {
+  calories: '#1fb567',
+  protein: '#3b82f6',
+  carbs: '#f59e0b',
+  oil: '#ec4899',
+  fat: '#d97706',
+  fiber: '#10b981',
+  water: '#0284c7',
 };
 
-export function metricCardColor(id: string): string {
-  return METRIC_CARD_COLORS[id] ?? 'bg-violet-500';
+export function defaultMetricColor(id: string): string {
+  const cleanId = id.trim().toLowerCase();
+  return DEFAULT_METRIC_COLORS[cleanId] ?? '#8b5cf6';
+}
+
+export function normalizeMetric(metric: Metric): Metric {
+  return {
+    ...metric,
+    color: metric.color || defaultMetricColor(metric.id),
+  };
+}
+
+/** Returns white or dark text depending on background luminance. */
+export function textColorForBackground(hex: string): string {
+  const raw = hex.replace('#', '');
+  if (raw.length !== 6 && raw.length !== 3) return '#ffffff';
+  const full = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.58 ? '#0f172a' : '#ffffff';
 }
 
 export function isTrackedMetric(id: string): boolean {
-  return (TRACKED_METRIC_IDS as readonly string[]).includes(id);
+  return id !== 'water';
 }
 
-/** Sums the actual value for a metric id from a set of food + water entries, or null if untracked. */
+export function isFoodLoggableMetric(id: string): boolean {
+  return id !== 'water';
+}
+
+/** Safely extracts a metric's numeric value from an entry */
+export function getEntryMetricValue(entry: Entry, metricId: string): number {
+  if (entry.values && typeof entry.values[metricId] === 'number') {
+    return Number(entry.values[metricId]) || 0;
+  }
+  if (metricId === 'calories') return Number(entry.calories) || 0;
+  if (metricId === 'protein') return Number(entry.protein) || 0;
+  if (metricId === 'carbs') return Number(entry.carbs) || 0;
+  return Number((entry as unknown as Record<string, unknown>)[metricId]) || 0;
+}
+
+/** Sums the actual value for a metric id from a set of food + water entries. */
 export function actualForMetric(
   metricId: string,
   entries: Entry[],
   waterEntries: WaterEntry[]
-): number | null {
-  switch (metricId) {
-    case 'calories':
-      return entries.reduce((sum, e) => sum + (Number(e.calories) || 0), 0);
-    case 'protein':
-      return entries.reduce((sum, e) => sum + (Number(e.protein) || 0), 0);
-    case 'carbs':
-      return entries.reduce((sum, e) => sum + (Number(e.carbs) || 0), 0);
-    case 'water':
-      return waterEntries.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0);
-    default:
-      return null;
+): number {
+  if (metricId === 'water') {
+    return waterEntries.reduce((sum, e) => sum + (Number(e.amountMl) || 0), 0);
   }
+  return entries.reduce((sum, e) => sum + getEntryMetricValue(e, metricId), 0);
 }
 
 export interface MetricProgress {
@@ -104,4 +137,26 @@ export function allTargetsMet(
     if (progress && !progress.met) return false;
   }
   return true;
+}
+
+/** Metrics with a target on the given day type, excluding water (logged separately). */
+export function foodMetricsForDayType(metrics: Metric[], targets: Record<string, number>): Metric[] {
+  return metrics.filter(
+    (m) => isFoodLoggableMetric(m.id) && targets[m.id] !== undefined && targets[m.id] > 0
+  );
+}
+
+export function hasWaterTarget(targets: Record<string, number>): boolean {
+  const target = targets.water;
+  return target !== undefined && target > 0;
+}
+
+export function entryValuesFromForm(
+  formValues: Record<string, string>
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [k, v] of Object.entries(formValues)) {
+    result[k] = Number(v || 0);
+  }
+  return result;
 }

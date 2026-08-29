@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { categoryIdForTime } from '@/lib/categories';
 import {
   actualForMetric,
-  metricCardColor,
+  entryValuesFromForm,
+  foodMetricsForDayType,
+  getEntryMetricValue,
+  hasWaterTarget,
+  isFoodLoggableMetric,
   progressForMetric,
   remainingLabel,
+  textColorForBackground,
 } from '@/lib/metrics';
 import {
   addEntry,
@@ -42,6 +48,10 @@ function isSameDay(isoA: string, isoB: string): boolean {
   );
 }
 
+function emptyFormValues(metricIds: string[]): Record<string, string> {
+  return Object.fromEntries(metricIds.map((id) => [id, '']));
+}
+
 export default function AddCaloriePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -51,24 +61,48 @@ export default function AddCaloriePage() {
   const [todayDayType, setTodayDayType] = useState<DayType | null>(null);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [calories, setCalories] = useState('');
-  const [protein, setProtein] = useState('');
-  const [carbs, setCarbs] = useState('');
+  const [metricValues, setMetricValues] = useState<Record<string, string>>({});
   const [time, setTime] = useState(() => toLocalDatetimeInputValue(new Date()));
   const [error, setError] = useState('');
   const [waterAmount, setWaterAmount] = useState('');
   const [waterError, setWaterError] = useState('');
 
+  const formMetrics = useMemo(
+    () => (todayDayType ? foodMetricsForDayType(metrics, todayDayType.targets) : []),
+    [metrics, todayDayType]
+  );
+
+  const showWaterSection = useMemo(
+    () => (todayDayType ? hasWaterTarget(todayDayType.targets) : false),
+    [todayDayType]
+  );
+
   useEffect(() => {
     const cats = getCategories();
+    const now = new Date();
     setCategories(cats);
-    setCategoryId(cats[0]?.id ?? '');
+    setCategoryId(categoryIdForTime(now, cats));
     setEntries(getEntries());
     setWaterEntries(getWaterEntries());
-    setMetrics(getMetrics());
+    const loadedMetrics = getMetrics();
+    setMetrics(loadedMetrics);
     setDayTypes(getDayTypes());
-    setTodayDayType(getDayTypeForDate(todayKey()));
+    const dayType = getDayTypeForDate(todayKey());
+    setTodayDayType(dayType);
+    setMetricValues(emptyFormValues(foodMetricsForDayType(loadedMetrics, dayType.targets).map((m) => m.id)));
   }, []);
+
+  useEffect(() => {
+    if (!todayDayType) return;
+    setMetricValues((prev) => {
+      const ids = foodMetricsForDayType(metrics, todayDayType.targets).map((m) => m.id);
+      const next = emptyFormValues(ids);
+      for (const id of ids) {
+        if (prev[id] !== undefined) next[id] = prev[id];
+      }
+      return next;
+    });
+  }, [todayDayType, metrics]);
 
   const todayEntries = useMemo(
     () => entries.filter((e) => isSameDay(e.time, new Date().toISOString())),
@@ -98,6 +132,14 @@ export default function AddCaloriePage() {
     setTodayDayType(selected);
   }
 
+  function handleTimeChange(value: string) {
+    setTime(value);
+    const picked = new Date(value);
+    if (!Number.isNaN(picked.getTime())) {
+      setCategoryId(categoryIdForTime(picked, categories));
+    }
+  }
+
   function categoryName(id: string) {
     return categories.find((c) => c.id === id)?.name ?? 'Uncategorized';
   }
@@ -118,29 +160,33 @@ export default function AddCaloriePage() {
       setError('Please select a category.');
       return;
     }
-    const caloriesNum = Number(calories);
-    const proteinNum = Number(protein || 0);
-    const carbsNum = Number(carbs || 0);
-    if (!Number.isFinite(caloriesNum) || caloriesNum < 0) {
-      setError('Please enter a valid calorie amount.');
-      return;
+
+    const numericValues = entryValuesFromForm(metricValues);
+
+    for (const m of formMetrics) {
+      const num = numericValues[m.id] ?? 0;
+      if (!Number.isFinite(num) || num < 0) {
+        setError(`Please enter a valid ${m.label.toLowerCase()} amount.`);
+        return;
+      }
     }
 
     const isoTime = new Date(time).toISOString();
     const updated = addEntry({
       name: name.trim(),
       categoryId,
-      calories: caloriesNum,
-      protein: proteinNum,
-      carbs: carbsNum,
+      calories: numericValues.calories ?? 0,
+      protein: numericValues.protein ?? 0,
+      carbs: numericValues.carbs ?? 0,
+      values: numericValues,
       time: isoTime,
     });
     setEntries(updated);
     setName('');
-    setCalories('');
-    setProtein('');
-    setCarbs('');
-    setTime(toLocalDatetimeInputValue(new Date()));
+    setMetricValues(emptyFormValues(formMetrics.map((m) => m.id)));
+    const resetDate = new Date();
+    setTime(toLocalDatetimeInputValue(resetDate));
+    setCategoryId(categoryIdForTime(resetDate, categories));
   }
 
   function handleDelete(id: string) {
@@ -194,7 +240,7 @@ export default function AddCaloriePage() {
           ))}
         </select>
         <p className="mt-1 text-[11px] text-gray-400">
-          Targets come from this day type. Configure types on the{' '}
+          Targets come from this day type. Configure types and metric colors on the{' '}
           <a href="/target-config" className="text-brand-600 underline">
             Targets
           </a>{' '}
@@ -204,26 +250,39 @@ export default function AddCaloriePage() {
 
       {metricProgress.length > 0 && (
         <div className="grid grid-cols-2 gap-3">
-          {metricProgress.map(({ metric, actual, target, pct }) => (
-            <div
-              key={metric.id}
-              className={`rounded-xl p-4 text-white shadow-sm ${metricCardColor(metric.id)}`}
-            >
-              <p className="text-xs font-medium opacity-90">Today&apos;s {metric.label}</p>
-              <p className="mt-1 text-2xl font-bold">
-                {actual !== null ? actual : '—'}
-                {actual !== null && metric.unit !== 'kcal' ? metric.unit : ''}
-              </p>
-              <p className="mt-1 text-[11px] opacity-90">
-                of {target} {metric.unit} target
-              </p>
-              {actual !== null && (
-                <div className="mt-2 h-1.5 w-full rounded-full bg-white/30">
-                  <div className="h-1.5 rounded-full bg-white" style={{ width: `${pct}%` }} />
-                </div>
-              )}
-            </div>
-          ))}
+          {metricProgress.map(({ metric, actual, target, pct }) => {
+            const textColor = textColorForBackground(metric.color);
+            const isLightText = textColor === '#ffffff';
+            const trackColor = isLightText ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)';
+            const fillColor = isLightText ? '#ffffff' : '#0f172a';
+            const subTextColor = isLightText ? 'rgba(255,255,255,0.88)' : 'rgba(15,23,42,0.75)';
+            return (
+              <div
+                key={metric.id}
+                className="relative overflow-hidden rounded-xl border border-black/5 p-4 shadow-sm"
+                style={{ backgroundColor: metric.color, color: textColor }}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: subTextColor }}>
+                  Today&apos;s {metric.label}
+                </p>
+                <p className="mt-1 text-2xl font-bold tracking-tight">
+                  {actual !== null ? actual : '—'}
+                  {actual !== null && metric.unit !== 'kcal' ? metric.unit : ''}
+                </p>
+                <p className="mt-1 text-[11px] font-medium" style={{ color: subTextColor }}>
+                  of {target} {metric.unit} target
+                </p>
+                {actual !== null && (
+                  <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: trackColor }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(0, pct))}%`, backgroundColor: fillColor }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -277,53 +336,48 @@ export default function AddCaloriePage() {
               </option>
             ))}
           </select>
+          <p className="mt-1 text-[11px] text-gray-400">
+            Auto-selects breakfast before 11am, lunch 11am–4pm, dinner after 4pm when time changes.
+          </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500">Calories (kcal)</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={calories}
-              onChange={(e) => setCalories(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
+        {formMetrics.length > 0 ? (
+          <div
+            className={`grid gap-3 ${
+              formMetrics.length >= 3 ? 'grid-cols-3' : formMetrics.length === 2 ? 'grid-cols-2' : 'grid-cols-1'
+            }`}
+          >
+            {formMetrics.map((m) => (
+              <div key={m.id}>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  {m.label} ({m.unit})
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  value={metricValues[m.id] ?? ''}
+                  onChange={(e) =>
+                    setMetricValues((prev) => ({ ...prev, [m.id]: e.target.value }))
+                  }
+                  placeholder="0"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            ))}
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500">Protein (g)</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={protein}
-              onChange={(e) => setProtein(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500">Carbs (g)</label>
-            <input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={carbs}
-              onChange={(e) => setCarbs(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-        </div>
+        ) : (
+          <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            No food metrics targeted for today. Add targets on the Targets page.
+          </p>
+        )}
 
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-500">Time</label>
           <input
             type="datetime-local"
             value={time}
-            onChange={(e) => setTime(e.target.value)}
+            onChange={(e) => handleTimeChange(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
@@ -332,72 +386,75 @@ export default function AddCaloriePage() {
 
         <button
           type="submit"
-          className="w-full rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white shadow-sm active:bg-brand-600"
+          disabled={formMetrics.length === 0}
+          className="w-full rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white shadow-sm active:bg-brand-600 disabled:opacity-40"
         >
           Add Entry
         </button>
       </form>
 
-      <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-600">💧 Water</h2>
-          <span className="text-xs text-gray-400">
-            {actualForMetric('water', todayEntries, todayWaterEntries) ?? 0}ml today
-          </span>
-        </div>
-        <div className="flex gap-2">
-          {WATER_QUICK_ADD_ML.map((ml) => (
+      {showWaterSection && (
+        <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-600">💧 Water</h2>
+            <span className="text-xs text-gray-400">
+              {actualForMetric('water', todayEntries, todayWaterEntries) ?? 0}ml today
+            </span>
+          </div>
+          <div className="flex gap-2">
+            {WATER_QUICK_ADD_ML.map((ml) => (
+              <button
+                key={ml}
+                type="button"
+                onClick={() => handleAddWater(ml)}
+                className="flex-1 rounded-lg bg-sky-50 py-2 text-xs font-semibold text-sky-600 active:bg-sky-100"
+              >
+                +{ml}ml
+              </button>
+            ))}
+          </div>
+          <form onSubmit={handleAddCustomWater} className="flex gap-2">
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={waterAmount}
+              onChange={(e) => setWaterAmount(e.target.value)}
+              placeholder="Custom amount (ml)"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            />
             <button
-              key={ml}
-              type="button"
-              onClick={() => handleAddWater(ml)}
-              className="flex-1 rounded-lg bg-sky-50 py-2 text-xs font-semibold text-sky-600 active:bg-sky-100"
+              type="submit"
+              className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-white active:bg-sky-600"
             >
-              +{ml}ml
+              Add
             </button>
-          ))}
+          </form>
+          {waterError && <p className="text-xs font-medium text-red-600">{waterError}</p>}
+          {todayWaterEntries.length > 0 && (
+            <ul className="space-y-1.5 pt-1">
+              {todayWaterEntries
+                .slice()
+                .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+                .map((w) => (
+                  <li key={w.id} className="flex items-center justify-between text-xs text-gray-500">
+                    <span>
+                      {w.amountMl}ml ·{' '}
+                      {new Date(w.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteWater(w.id)}
+                      aria-label="Delete water entry"
+                      className="rounded-full p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    >
+                      🗑️
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
         </div>
-        <form onSubmit={handleAddCustomWater} className="flex gap-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={waterAmount}
-            onChange={(e) => setWaterAmount(e.target.value)}
-            placeholder="Custom amount (ml)"
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-white active:bg-sky-600"
-          >
-            Add
-          </button>
-        </form>
-        {waterError && <p className="text-xs font-medium text-red-600">{waterError}</p>}
-        {todayWaterEntries.length > 0 && (
-          <ul className="space-y-1.5 pt-1">
-            {todayWaterEntries
-              .slice()
-              .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-              .map((w) => (
-                <li key={w.id} className="flex items-center justify-between text-xs text-gray-500">
-                  <span>
-                    {w.amountMl}ml ·{' '}
-                    {new Date(w.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <button
-                    onClick={() => handleDeleteWater(w.id)}
-                    aria-label="Delete water entry"
-                    className="rounded-full p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                  >
-                    🗑️
-                  </button>
-                </li>
-              ))}
-          </ul>
-        )}
-      </div>
+      )}
 
       <div>
         <h2 className="mb-2 text-sm font-semibold text-gray-600">Today&apos;s Entries</h2>
@@ -410,44 +467,63 @@ export default function AddCaloriePage() {
             {todayEntries
               .slice()
               .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-              .map((e) => (
-                <li
-                  key={e.id}
-                  className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: categoryColor(e.categoryId) }}
-                      />
-                      <p className="truncate text-sm font-medium text-gray-800">{e.name}</p>
-                    </div>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {categoryName(e.categoryId)} ·{' '}
-                      {new Date(e.time).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3 pl-2">
-                    <div className="text-right text-xs">
-                      <p className="font-semibold text-gray-800">{e.calories} kcal</p>
-                      <p className="text-gray-400">
-                        {e.protein}g P · {e.carbs ?? 0}g C
+              .map((e) => {
+                const nonCalorieMetrics = metrics
+                  .filter((m) => isFoodLoggableMetric(m.id) && m.id !== 'calories')
+                  .map((m) => ({ metric: m, val: getEntryMetricValue(e, m.id) }))
+                  .filter((item) => item.val > 0);
+
+                const calVal = getEntryMetricValue(e, 'calories');
+
+                return (
+                  <li
+                    key={e.id}
+                    className="flex items-center justify-between rounded-xl bg-white p-3 shadow-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: categoryColor(e.categoryId) }}
+                        />
+                        <p className="truncate text-sm font-medium text-gray-800">{e.name}</p>
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {categoryName(e.categoryId)} ·{' '}
+                        {new Date(e.time).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleDelete(e.id)}
-                      aria-label="Delete entry"
-                      className="rounded-full p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </li>
-              ))}
+                    <div className="flex shrink-0 items-center gap-3 pl-2">
+                      <div className="text-right text-xs">
+                        {calVal > 0 ? (
+                          <p className="font-semibold text-gray-800">{calVal} kcal</p>
+                        ) : nonCalorieMetrics.length > 0 ? (
+                          <p className="font-semibold text-gray-800">
+                            {nonCalorieMetrics[0].val}{nonCalorieMetrics[0].metric.unit} {nonCalorieMetrics[0].metric.label}
+                          </p>
+                        ) : (
+                          <p className="font-semibold text-gray-800">0 kcal</p>
+                        )}
+                        <p className="text-gray-400">
+                          {nonCalorieMetrics
+                            .map((item) => `${item.val}${item.metric.unit === 'g' ? 'g' : ` ${item.metric.unit}`} ${item.metric.label}`)
+                            .join(' · ') || (calVal > 0 ? 'No other metrics' : '')}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDelete(e.id)}
+                        aria-label="Delete entry"
+                        className="rounded-full p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
           </ul>
         )}
       </div>

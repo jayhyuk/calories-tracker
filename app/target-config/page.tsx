@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { defaultMetricColor } from '@/lib/metrics';
 import {
   addDayType,
   addMetric,
@@ -12,6 +13,7 @@ import {
   saveDayTypes,
   setDefaultDayTypeId,
   updateDayType,
+  updateMetric,
 } from '@/lib/storage';
 import { DayType, Metric } from '@/lib/types';
 
@@ -19,11 +21,13 @@ const COLOR_PRESETS = [
   '#1fb567',
   '#3b82f6',
   '#f59e0b',
-  '#a855f7',
-  '#ef4444',
-  '#06b6d4',
   '#ec4899',
-  '#84cc16',
+  '#8b5cf6',
+  '#06b6d4',
+  '#ef4444',
+  '#d97706',
+  '#10b981',
+  '#64748b',
 ];
 
 export default function TargetConfigPage() {
@@ -34,7 +38,15 @@ export default function TargetConfigPage() {
   const [metricLabel, setMetricLabel] = useState('');
   const [metricUnit, setMetricUnit] = useState('');
   const [metricDirection, setMetricDirection] = useState<'min' | 'max'>('max');
+  const [metricColor, setMetricColor] = useState(COLOR_PRESETS[2]); // amber by default
   const [metricError, setMetricError] = useState('');
+
+  const [editingMetricId, setEditingMetricId] = useState<string | null>(null);
+  const [editMetricLabel, setEditMetricLabel] = useState('');
+  const [editMetricUnit, setEditMetricUnit] = useState('');
+  const [editMetricDirection, setEditMetricDirection] = useState<'min' | 'max'>('max');
+  const [editMetricColor, setEditMetricColor] = useState(COLOR_PRESETS[0]);
+  const [editMetricError, setEditMetricError] = useState('');
 
   const [dayTypeName, setDayTypeName] = useState('');
   const [dayTypeColor, setDayTypeColor] = useState(COLOR_PRESETS[0]);
@@ -73,12 +85,49 @@ export default function TargetConfigPage() {
       setMetricError('Please enter a unit (e.g. kcal, g, ml).');
       return;
     }
-    const updated = addMetric(label, unit, metricDirection);
+    const updated = addMetric(label, unit, metricDirection, metricColor);
     setMetrics(updated);
     setMetricLabel('');
     setMetricUnit('');
     setMetricDirection('max');
+    setMetricColor(COLOR_PRESETS[2]);
     setDayTypeTargets((prev) => ({ ...prev, [updated[updated.length - 1].id]: '' }));
+  }
+
+  function startEditMetric(m: Metric) {
+    setEditingMetricId(m.id);
+    setEditMetricLabel(m.label);
+    setEditMetricUnit(m.unit);
+    setEditMetricDirection(m.direction);
+    setEditMetricColor(m.color || defaultMetricColor(m.id));
+    setEditMetricError('');
+  }
+
+  function cancelEditMetric() {
+    setEditingMetricId(null);
+  }
+
+  function handleSaveEditMetric(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!editingMetricId) return;
+    const label = editMetricLabel.trim();
+    const unit = editMetricUnit.trim();
+    if (!label) {
+      setEditMetricError('Please enter a metric name.');
+      return;
+    }
+    if (!unit) {
+      setEditMetricError('Please enter a unit.');
+      return;
+    }
+    const updated = updateMetric(editingMetricId, {
+      label,
+      unit,
+      direction: editMetricDirection,
+      color: editMetricColor,
+    });
+    setMetrics(updated);
+    setEditingMetricId(null);
   }
 
   function handleRemoveMetric(id: string) {
@@ -193,7 +242,7 @@ export default function TargetConfigPage() {
                 type="text"
                 value={metricLabel}
                 onChange={(e) => setMetricLabel(e.target.value)}
-                placeholder="e.g. Fiber"
+                placeholder="e.g. Oil"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
             </div>
@@ -219,6 +268,23 @@ export default function TargetConfigPage() {
               </select>
             </div>
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">Color</label>
+            <div className="flex flex-wrap gap-2">
+              {COLOR_PRESETS.map((c) => (
+                <button
+                  type="button"
+                  key={c}
+                  onClick={() => setMetricColor(c)}
+                  aria-label={`Select color ${c}`}
+                  className={`h-7 w-7 rounded-full border-2 ${
+                    metricColor === c ? 'border-gray-900 ring-2 ring-gray-300' : 'border-transparent'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
           {metricError && <p className="text-xs font-medium text-red-600">{metricError}</p>}
           <button
             type="submit"
@@ -232,22 +298,109 @@ export default function TargetConfigPage() {
             {metrics.map((m) => (
               <li
                 key={m.id}
-                className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"
+                className="rounded-lg bg-gray-50 p-3 text-sm"
               >
-                <div>
-                  <span className="font-medium text-gray-800">{m.label}</span>
-                  <span className="ml-2 text-xs text-gray-400">
-                    {m.unit} · {m.direction === 'max' ? 'stay under' : 'reach at least'}
-                  </span>
-                </div>
-                {!['calories', 'protein', 'carbs', 'water'].includes(m.id) && (
-                  <button
-                    onClick={() => handleRemoveMetric(m.id)}
-                    aria-label={`Remove ${m.label}`}
-                    className="rounded-full p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                  >
-                    🗑️
-                  </button>
+                {editingMetricId === m.id ? (
+                  <form onSubmit={handleSaveEditMetric} className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="col-span-2">
+                        <label className="mb-0.5 block text-[11px] text-gray-500">Metric Name</label>
+                        <input
+                          type="text"
+                          value={editMetricLabel}
+                          onChange={(e) => setEditMetricLabel(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[11px] text-gray-500">Unit</label>
+                        <input
+                          type="text"
+                          value={editMetricUnit}
+                          onChange={(e) => setEditMetricUnit(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[11px] text-gray-500">Goal Type</label>
+                        <select
+                          value={editMetricDirection}
+                          onChange={(e) => setEditMetricDirection(e.target.value as 'min' | 'max')}
+                          className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="max">Max (stay under)</option>
+                          <option value="min">Min (reach at least)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-gray-500">Color</label>
+                      <div className="flex flex-wrap gap-2">
+                        {COLOR_PRESETS.map((c) => (
+                          <button
+                            type="button"
+                            key={c}
+                            onClick={() => setEditMetricColor(c)}
+                            aria-label={`Choose color ${c}`}
+                            className={`h-6 w-6 rounded-full border-2 ${
+                              editMetricColor === c ? 'border-gray-900 ring-2 ring-gray-300' : 'border-transparent'
+                            }`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {editMetricError && (
+                      <p className="text-xs font-medium text-red-600">{editMetricError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="flex-1 rounded-lg bg-brand-500 py-1.5 text-xs font-semibold text-white"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEditMetric}
+                        className="flex-1 rounded-lg bg-gray-200 py-1.5 text-xs font-semibold text-gray-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-black/10 shadow-xs"
+                        style={{ backgroundColor: m.color }}
+                      />
+                      <div>
+                        <span className="font-medium text-gray-800">{m.label}</span>
+                        <span className="ml-2 text-xs text-gray-400">
+                          {m.unit} · {m.direction === 'max' ? 'stay under' : 'reach at least'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => startEditMetric(m)}
+                        className="rounded-lg px-2 py-1 text-xs text-gray-500 hover:bg-white"
+                      >
+                        Edit
+                      </button>
+                      {!['calories', 'protein', 'carbs', 'water'].includes(m.id) && (
+                        <button
+                          onClick={() => handleRemoveMetric(m.id)}
+                          aria-label={`Remove ${m.label}`}
+                          className="rounded-full p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                        >
+                          🗑️
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
               </li>
             ))}

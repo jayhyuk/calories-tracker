@@ -10,6 +10,7 @@ import {
   TrackerData,
   WaterEntry,
 } from './types';
+import { defaultMetricColor, normalizeMetric } from './metrics';
 
 const CATEGORIES_KEY = 'calorie-tracker:categories';
 const ENTRIES_KEY = 'calorie-tracker:entries';
@@ -30,10 +31,10 @@ const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 export const DEFAULT_METRICS: Metric[] = [
-  { id: 'calories', label: 'Calories', unit: 'kcal', direction: 'max' },
-  { id: 'protein', label: 'Protein', unit: 'g', direction: 'min' },
-  { id: 'carbs', label: 'Carbs', unit: 'g', direction: 'max' },
-  { id: 'water', label: 'Water', unit: 'ml', direction: 'min' },
+  { id: 'calories', label: 'Calories', unit: 'kcal', direction: 'max', color: defaultMetricColor('calories') },
+  { id: 'protein', label: 'Protein', unit: 'g', direction: 'min', color: defaultMetricColor('protein') },
+  { id: 'carbs', label: 'Carbs', unit: 'g', direction: 'max', color: defaultMetricColor('carbs') },
+  { id: 'water', label: 'Water', unit: 'ml', direction: 'min', color: defaultMetricColor('water') },
 ];
 
 const LEGACY_GOALS_DEFAULT: LegacyGoals = { calories: 2000, protein: 150, carbs: 250, water: 2000 };
@@ -178,7 +179,10 @@ export function getMetrics(): Metric[] {
     window.localStorage.setItem(METRICS_KEY, JSON.stringify(DEFAULT_METRICS));
     return DEFAULT_METRICS;
   }
-  return safeParse<Metric[]>(existing, DEFAULT_METRICS);
+  const raw = safeParse<Metric[]>(existing, DEFAULT_METRICS);
+  const parsed = raw.map(normalizeMetric);
+  if (raw.some((m) => !m.color)) saveMetrics(parsed);
+  return parsed;
 }
 
 export function saveMetrics(metrics: Metric[]): void {
@@ -186,7 +190,12 @@ export function saveMetrics(metrics: Metric[]): void {
   window.localStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
 }
 
-export function addMetric(label: string, unit: string, direction: 'min' | 'max'): Metric[] {
+export function addMetric(
+  label: string,
+  unit: string,
+  direction: 'min' | 'max',
+  color: string = defaultMetricColor(label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'))
+): Metric[] {
   const metrics = getMetrics();
   const id = label
     .trim()
@@ -194,7 +203,16 @@ export function addMetric(label: string, unit: string, direction: 'min' | 'max')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '') || newId();
   const uniqueId = metrics.some((m) => m.id === id) ? `${id}_${newId().slice(0, 4)}` : id;
-  const updated = [...metrics, { id: uniqueId, label: label.trim(), unit: unit.trim(), direction }];
+  const updated = [
+    ...metrics,
+    { id: uniqueId, label: label.trim(), unit: unit.trim(), direction, color },
+  ];
+  saveMetrics(updated);
+  return updated;
+}
+
+export function updateMetric(id: string, patch: Partial<Omit<Metric, 'id'>>): Metric[] {
+  const updated = getMetrics().map((m) => (m.id === id ? normalizeMetric({ ...m, ...patch }) : m));
   saveMetrics(updated);
   return updated;
 }
@@ -347,6 +365,8 @@ export function importAllData(data: TrackerData, mode: 'replace' | 'merge' = 're
   }
   if (!importedMetrics) {
     importedMetrics = DEFAULT_METRICS;
+  } else {
+    importedMetrics = importedMetrics.map(normalizeMetric);
   }
   if (!importedDefaultDayTypeId) {
     importedDefaultDayTypeId = importedDayTypes[0]?.id ?? defaultDayType().id;

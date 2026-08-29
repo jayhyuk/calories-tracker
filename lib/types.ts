@@ -11,6 +11,8 @@ export interface Entry {
   calories: number;
   protein: number;
   carbs: number;
+  /** Dynamic metric values (e.g. oil, fat, fiber, etc., including calories, protein, carbs) */
+  values?: Record<string, number>;
   /** ISO datetime string, editable by the user (defaults to "now" at creation time) */
   time: string;
   createdAt: string;
@@ -36,6 +38,8 @@ export interface Metric {
   label: string;
   unit: string;
   direction: 'min' | 'max';
+  /** Hex color used on progress cards in the Add page */
+  color: string;
 }
 
 /**
